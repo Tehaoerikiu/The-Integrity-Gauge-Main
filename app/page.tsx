@@ -239,16 +239,31 @@ export default function Home() {
 
   async function saveSettings() {
     if (!user?.id) return;
+    const finalMusicVolume = musicEnabled ? musicVolume : 0;
+    const finalSfxVolume = soundEnabled ? sfxVolume : 0;
     await supabase.from("users").update({
       sound_enabled: soundEnabled,
-      music_volume: musicEnabled ? musicVolume : 0,
-      sfx_volume: soundEnabled ? sfxVolume : 0,
+      music_volume: finalMusicVolume,
+      sfx_volume: finalSfxVolume,
     }).eq("id", user.id);
+
+    // Sync to localStorage so MusicProvider & SFX read the correct values
+    try {
+      const raw = localStorage.getItem("game-user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        u.sound_enabled = soundEnabled;
+        u.music_volume = finalMusicVolume;
+        u.sfx_volume = finalSfxVolume;
+        localStorage.setItem("game-user", JSON.stringify(u));
+      }
+    } catch {}
+
     window.dispatchEvent(new CustomEvent("integrity-music-settings", {
       detail: {
         action: "sync",
         musicEnabled,
-        musicVolume: musicEnabled ? musicVolume : 0,
+        musicVolume: finalMusicVolume,
       },
     }));
     setShowSettings(false);

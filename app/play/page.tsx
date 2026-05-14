@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Coins, Pause, Play, RotateCcw, Shield, Backpack } from "lucide-react";
+import { ArrowLeft, Coins, Pause, Play, RotateCcw, Shield, Backpack, Heart } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import styles from "./play.module.css";
 
 type DropType = "honest" | "corrupt" | "police";
-type Phase = "ready" | "running" | "paused" | "ended" | "inventory";
+type Phase = "ready" | "countdown" | "running" | "paused" | "ended" | "inventory";
 
 type InventoryItem = {
   id: number;
@@ -90,7 +90,9 @@ export default function PlayPage() {
   const [corruption, setCorruption] = useState(0);
   const [stunnedUntil, setStunnedUntil] = useState(0);
   const [isStunned, setIsStunned] = useState(false);
-  
+  const [lives, setLives] = useState(3);
+  const [countdownText, setCountdownText] = useState("");
+
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [shieldUntil, setShieldUntil] = useState(0);
   const [magnetUntil, setMagnetUntil] = useState(0);
@@ -109,19 +111,24 @@ export default function PlayPage() {
   const playerXRef = useRef(playerX);
   const phaseRef = useRef(phase);
   const startedAtRef = useRef(0);
-  
+  const livesRef = useRef(lives);
+
   const shieldUntilRef = useRef(0);
   const magnetUntilRef = useRef(0);
   const boostUntilRef = useRef(0);
   const hasCrownRef = useRef(false);
   const crownTimerRef = useRef(0);
+  const collectSfxRef = useRef<HTMLAudioElement | null>(null);
+  const corruptSfxRef = useRef<HTMLAudioElement | null>(null);
+  const gameplayMusicRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => { moneyRef.current = money; }, [money]);
-  useEffect(() => { integrityRef.current = integrity; }, [integrity]);
+
   useEffect(() => { corruptionRef.current = corruption; }, [corruption]);
   useEffect(() => { playerXRef.current = playerX; }, [playerX]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
-  
+  useEffect(() => { livesRef.current = lives; }, [lives]);
+
   useEffect(() => { shieldUntilRef.current = shieldUntil; }, [shieldUntil]);
   useEffect(() => { magnetUntilRef.current = magnetUntil; }, [magnetUntil]);
   useEffect(() => { boostUntilRef.current = boostUntil; }, [boostUntil]);
@@ -130,41 +137,36 @@ export default function PlayPage() {
   const fetchInventory = useCallback(async () => {
     const user = readUser();
     if (!user) return;
-    
+
     const { data: itemsData } = await supabase.from('shop_items').select('*');
     if (!itemsData) return;
-    
+
     const { data: invData } = await supabase.from('user_inventory').select('*').eq('user_id', user.id);
     if (!invData) return;
-    
+
     const grouped = new Map<number, InventoryItem>();
     let crown = false;
-    
+
     invData.forEach(inv => {
       const itemDef = itemsData.find((i: any) => i.id === inv.item_id);
       if (!itemDef) return;
-      if (itemDef.id === 4) {
-        crown = true;
-        return; // Do not show passive item in inventory list
-      }
-      
+
       if (!grouped.has(itemDef.id)) {
-        grouped.set(itemDef.id, { 
+        grouped.set(itemDef.id, {
           id: itemDef.id,
           item_name: itemDef.item_name,
           emoji: itemDef.emoji,
           description: itemDef.description,
           rarity: itemDef.rarity,
-          count: 0, 
-          instances: [] 
+          count: 0,
+          instances: []
         });
       }
       const group = grouped.get(itemDef.id)!;
       group.count++;
       group.instances.push(inv.id);
     });
-    
-    setHasCrown(crown);
+
     setInventory(Array.from(grouped.values()));
   }, []);
 
@@ -175,20 +177,71 @@ export default function PlayPage() {
   const useItem = useCallback(async (item: InventoryItem) => {
     if (phaseRef.current !== "inventory" && phaseRef.current !== "running") return;
     if (item.count <= 0) return;
-    if (item.id === 4) return;
-    
+
+    // Crown: activate manually, don't consume
+    if (item.id === 4) {
+      if (hasCrownRef.current) return; // already active
+      setHasCrown(true);
+      try {
+        const sfx = new Audio("/assets/sound/Crown.mp3");
+        const raw = localStorage.getItem("game-user");
+        const u = raw ? JSON.parse(raw) : null;
+        const sfxVol = Number(u?.sfx_volume ?? 80);
+        if (sfxVol > 0) {
+          sfx.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+          sfx.play().catch(() => { });
+        }
+      } catch { }
+    }
+
     const now = performance.now();
-    if (item.id === 1) setShieldUntil(now + 5000);
-    else if (item.id === 2) setMagnetUntil(now + 10000);
-    else if (item.id === 3) setBoostUntil(now + 8000);
-    
+    if (item.id === 1) {
+      setShieldUntil(now + 5000);
+      try {
+        const sfx = new Audio("/assets/sound/Shield.mp3");
+        const raw = localStorage.getItem("game-user");
+        const u = raw ? JSON.parse(raw) : null;
+        const sfxVol = Number(u?.sfx_volume ?? 80);
+        if (sfxVol > 0) {
+          sfx.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+          sfx.play().catch(() => { });
+        }
+      } catch { }
+    }
+    else if (item.id === 2) {
+      setMagnetUntil(now + 10000);
+      try {
+        const sfx = new Audio("/assets/sound/Magnet Wave.mp3");
+        const raw = localStorage.getItem("game-user");
+        const u = raw ? JSON.parse(raw) : null;
+        const sfxVol = Number(u?.sfx_volume ?? 80);
+        if (sfxVol > 0) {
+          sfx.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+          sfx.play().catch(() => { });
+        }
+      } catch { }
+    }
+    else if (item.id === 3) {
+      setBoostUntil(now + 8000);
+      try {
+        const sfx = new Audio("/assets/sound/Booster.mp3");
+        const raw = localStorage.getItem("game-user");
+        const u = raw ? JSON.parse(raw) : null;
+        const sfxVol = Number(u?.sfx_volume ?? 80);
+        if (sfxVol > 0) {
+          sfx.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+          sfx.play().catch(() => { });
+        }
+      } catch { }
+    }
+
     setInventory(prev => prev.map(i => {
       if (i.id === item.id) {
         return { ...i, count: i.count - 1, instances: i.instances.slice(1) };
       }
       return i;
     }).filter(i => i.count > 0));
-    
+
     const instanceId = item.instances[0];
     await supabase.from('user_inventory').delete().eq('id', instanceId);
   }, []);
@@ -197,7 +250,30 @@ export default function PlayPage() {
     window.dispatchEvent(new CustomEvent("integrity-music-settings", {
       detail: { action: "stop" }
     }));
+
+    // Pre-load collect items SFX
+    collectSfxRef.current = new Audio("/assets/sound/collect items.mp3");
+    corruptSfxRef.current = new Audio("/assets/sound/collect risky items.mp3");
+
+    const audio = new Audio("/assets/sound/Paper Crown Patrol.mp3");
+    audio.loop = true;
+    gameplayMusicRef.current = audio;
+
+    try {
+      const raw = localStorage.getItem("game-user");
+      const user = raw ? JSON.parse(raw) : null;
+      const volume = Number(user?.music_volume ?? 80);
+      audio.volume = Math.max(0, Math.min(100, volume)) / 100;
+
+      if (volume > 0) {
+        audio.play().catch(() => { });
+      }
+    } catch {
+      // ignore
+    }
+
     return () => {
+      audio.pause();
       window.dispatchEvent(new CustomEvent("integrity-music-settings", {
         detail: { action: "play" }
       }));
@@ -210,6 +286,12 @@ export default function PlayPage() {
     if (integrity >= 35) return { label: "Diawasi", shop: "Upgrade lebih mahal", tone: "warn" };
     return { label: "Risiko Tinggi", shop: "Polisi makin sering", tone: "bad" };
   }, [integrity]);
+
+  useEffect(() => {
+    if (arenaRef.current) {
+      setPlayerX(arenaRef.current.getBoundingClientRect().width / 2 - PLAYER_WIDTH / 2);
+    }
+  }, []);
 
   const saveProgress = useCallback(async () => {
     if (savedRef.current || moneyRef.current <= 0) return;
@@ -239,19 +321,57 @@ export default function PlayPage() {
   const endGame = useCallback((message: string) => {
     setPhase("ended");
     setNotice(message);
+
+    // Stop gameplay music
+    if (gameplayMusicRef.current) {
+      gameplayMusicRef.current.pause();
+    }
+
+    // Play Game Over SFX
+    try {
+      const gameOverAudio = new Audio("/assets/sound/Game Over.mp3");
+      const raw = localStorage.getItem("game-user");
+      const u = raw ? JSON.parse(raw) : null;
+      const sfxVol = Number(u?.sfx_volume ?? 80);
+      if (sfxVol > 0) {
+        gameOverAudio.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+        gameOverAudio.play().catch(() => { });
+      }
+    } catch { }
+
+    if (hasCrownRef.current) {
+      hasCrownRef.current = false;
+      setHasCrown(false);
+    }
+
     void saveProgress();
   }, [saveProgress]);
+
+  useEffect(() => {
+    integrityRef.current = integrity;
+  }, [integrity]);
+
+  useEffect(() => {
+    if (lives <= 0 && phaseRef.current === "running") {
+      endGame("Nyawa habis! Kamu ditangkap polisi.");
+    }
+  }, [lives, endGame]);
 
   const resetGame = useCallback(() => {
     dropsRef.current = [];
     savedRef.current = false;
     setDrops([]);
-    setPlayerX(50);
+    if (arenaRef.current) {
+      setPlayerX(arenaRef.current.getBoundingClientRect().width / 2 - PLAYER_WIDTH / 2);
+    } else {
+      setPlayerX(50);
+    }
     setMoney(0);
     setIntegrity(100);
     setCorruption(0);
     setStunnedUntil(0);
     setIsStunned(false);
+    setLives(3);
     setNotice("Pilih aman atau cepat kaya. Semua ada konsekuensinya.");
     setSavedStatus("");
     setPhase("ready");
@@ -262,7 +382,34 @@ export default function PlayPage() {
     startedAtRef.current = performance.now();
     lastFrameRef.current = performance.now();
     spawnTimerRef.current = 0;
-    setPhase("running");
+
+    // Countdown phase
+    setPhase("countdown");
+    setCountdownText("3");
+
+    // Resume gameplay music only if it was paused (e.g. after game over)
+    if (gameplayMusicRef.current && gameplayMusicRef.current.paused) {
+      gameplayMusicRef.current.currentTime = 0;
+      gameplayMusicRef.current.play().catch(() => { });
+    }
+
+    // Play countdown SFX
+    try {
+      const countdownAudio = new Audio("/assets/sound/3, 2, 1, GO!.mp3");
+      const raw = localStorage.getItem("game-user");
+      const u = raw ? JSON.parse(raw) : null;
+      const sfxVol = Number(u?.sfx_volume ?? 80);
+      countdownAudio.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+      if (sfxVol > 0) countdownAudio.play().catch(() => { });
+    } catch { }
+
+    setTimeout(() => setCountdownText("2"), 1000);
+    setTimeout(() => setCountdownText("1"), 2000);
+    setTimeout(() => setCountdownText("GO!"), 3000);
+    setTimeout(() => {
+      setCountdownText("");
+      setPhase("running");
+    }, 3700);
   }, [resetGame]);
 
   const spawnDrop = useCallback((width: number, now: number) => {
@@ -334,25 +481,17 @@ export default function PlayPage() {
       const rect = arena.getBoundingClientRect();
       const dt = Math.min(32, now - lastFrameRef.current) / 1000;
       lastFrameRef.current = now;
-      
-      if (hasCrownRef.current) {
-        crownTimerRef.current -= dt * 1000;
-        if (crownTimerRef.current <= 0) {
-          setIntegrity(v => clamp(v + 1, 0, 100));
-          crownTimerRef.current = 1000;
-        }
-      }
 
       const stunned = now < stunnedUntil;
       setIsStunned(stunned);
-      
+
       const isShieldActive = now < shieldUntilRef.current;
       const isMagnetActive = now < magnetUntilRef.current;
       const isBoostActive = now < boostUntilRef.current;
       setIsShieldActive(isShieldActive);
       setIsMagnetActive(isMagnetActive);
       setIsBoostActive(isBoostActive);
-      
+
       const moveSpeed = stunned ? 0 : 410;
       const direction = Number(keysRef.current.right) - Number(keysRef.current.left);
       const nextPlayerX = clamp(playerXRef.current + direction * moveSpeed * dt, 0, rect.width - PLAYER_WIDTH);
@@ -378,15 +517,23 @@ export default function PlayPage() {
       for (const drop of dropsRef.current) {
         let movedX = drop.x;
         let movedY = drop.y + drop.speed * dt;
-        
+
         if (isMagnetActive && drop.type === "honest") {
-          const dx = playerBox.left + PLAYER_WIDTH/2 - (drop.x + drop.size/2);
-          const dy = playerBox.top + PLAYER_HEIGHT/2 - (drop.y + drop.size/2);
-          const dist = Math.sqrt(dx*dx + dy*dy);
+          const dx = playerBox.left + PLAYER_WIDTH / 2 - (drop.x + drop.size / 2);
+          const dy = playerBox.top + PLAYER_HEIGHT / 2 - (drop.y + drop.size / 2);
+          const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist > 0 && dist < 450) {
             movedX += (dx / dist) * 220 * dt;
             movedY += (dy / dist) * 220 * dt;
           }
+        }
+
+        // Corrupt & police items gently track player horizontally
+        if (drop.type === "corrupt" || drop.type === "police") {
+          const dx = playerBox.left + PLAYER_WIDTH / 2 - (drop.x + drop.size / 2);
+          const trackSpeed = drop.type === "police" ? 75 : 55;
+          if (dx > 0) movedX += Math.min(dx, trackSpeed * dt);
+          else movedX += Math.max(dx, -trackSpeed * dt);
         }
 
         const moved = { ...drop, x: movedX, y: movedY };
@@ -404,20 +551,45 @@ export default function PlayPage() {
 
         if (hit) {
           if (moved.type === "honest") {
-            const val = isBoostActive ? moved.money * 2 : moved.money;
+            const val = isBoostActive ? Math.floor(moved.money * 2.5) : moved.money;
             setMoney((value) => value + val);
-            setIntegrity((value) => clamp(value + moved.integrity, 0, 100));
+            const integrityGain = hasCrownRef.current ? moved.integrity + 1 : moved.integrity;
+            setIntegrity((value) => clamp(value + integrityGain, 0, 100));
             setNotice(`${moved.label}: uang kecil, integritas naik.`);
+
+            // Play collect SFX
+            try {
+              const raw = localStorage.getItem("game-user");
+              const u = raw ? JSON.parse(raw) : null;
+              const sfxVol = Number(u?.sfx_volume ?? 80);
+              if (sfxVol > 0 && collectSfxRef.current) {
+                collectSfxRef.current.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+                collectSfxRef.current.currentTime = 0;
+                collectSfxRef.current.play().catch(() => { });
+              }
+            } catch { }
           } else if (moved.type === "corrupt") {
             if (isShieldActive) {
               setNotice("Dilindungi oleh Perisai! Efek korupsi diabaikan.");
               setShieldUntil(0);
             } else {
-              const val = isBoostActive ? moved.money * 2 : moved.money;
+              const val = isBoostActive ? Math.floor(moved.money * 2.5) : moved.money;
               setMoney((value) => value + val);
               setIntegrity((value) => clamp(value + moved.integrity, 0, 100));
               setCorruption((value) => value + 1);
               setNotice(`${moved.label}: uang besar, tapi polisi makin waspada.`);
+
+              // Play corrupt collect SFX
+              try {
+                const raw = localStorage.getItem("game-user");
+                const u = raw ? JSON.parse(raw) : null;
+                const sfxVol = Number(u?.sfx_volume ?? 80);
+                if (sfxVol > 0 && corruptSfxRef.current) {
+                  corruptSfxRef.current.volume = Math.min(1, (Math.max(0, Math.min(100, sfxVol)) / 100) * 1.8);
+                  corruptSfxRef.current.currentTime = 0;
+                  corruptSfxRef.current.play().catch(() => { });
+                }
+              } catch { }
             }
           } else {
             if (isShieldActive) {
@@ -428,7 +600,20 @@ export default function PlayPage() {
               setIntegrity((value) => clamp(value + moved.integrity, 0, 100));
               setStunnedUntil(now + 1400);
               setIsStunned(true);
-              setNotice("Kena polisi. Uang berkurang dan kamu terkena stun.");
+              setLives((prev) => prev - 1);
+              setNotice("Kena polisi. Nyawa dan uang berkurang, kamu terkena stun.");
+
+              // Play police SFX
+              try {
+                const sfx = new Audio("/assets/sound/chased by police.mp3");
+                const raw = localStorage.getItem("game-user");
+                const u = raw ? JSON.parse(raw) : null;
+                const sfxVol = Number(u?.sfx_volume ?? 80);
+                if (sfxVol > 0) {
+                  sfx.volume = Math.max(0, Math.min(100, sfxVol)) / 100;
+                  sfx.play().catch(() => { });
+                }
+              } catch { }
             }
           }
           continue;
@@ -455,8 +640,8 @@ export default function PlayPage() {
         <div className={styles.skyline} />
 
         <button className={styles.inventoryToggle} onClick={() => {
-            if (phase === "running") setPhase("inventory");
-            else if (phase === "inventory") setPhase("running");
+          if (phase === "running") setPhase("inventory");
+          else if (phase === "inventory") setPhase("running");
         }}>
           <Backpack size={20} color="#2f3270" />
         </button>
@@ -466,10 +651,16 @@ export default function PlayPage() {
             <Coins size={16} />
             {money}
           </div>
+          <div className={styles.livesContainer}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Heart key={i} size={18} fill={i < lives ? "#ef4444" : "transparent"} color={i < lives ? "#ef4444" : "#9ca3af"} strokeWidth={2.5} />
+            ))}
+          </div>
           <button
             className={styles.iconButton}
             onClick={() => setPhase((value) => value === "running" ? "paused" : value === "paused" ? "running" : value)}
             type="button"
+            style={{ marginLeft: "auto" }}
           >
             {phase === "paused" ? <Play size={16} /> : <Pause size={16} />}
           </button>
@@ -560,7 +751,23 @@ export default function PlayPage() {
           </button>
         </div>
 
-        {phase !== "running" && (
+        {phase === "countdown" && (
+          <div className={styles.overlay} style={{ zIndex: 50 }}>
+            <div style={{
+              fontSize: countdownText === "GO!" ? "72px" : "96px",
+              fontWeight: 900,
+              color: countdownText === "GO!" ? "#22c55e" : "#fff",
+              textShadow: "0 4px 24px rgba(0,0,0,0.4), 0 0 60px rgba(255,255,255,0.3)",
+              animation: "pulse 0.5s ease-in-out",
+              fontFamily: "'Fredoka One', cursive",
+              letterSpacing: "4px",
+            }}>
+              {countdownText}
+            </div>
+          </div>
+        )}
+
+        {phase !== "running" && phase !== "countdown" && (
           <div className={styles.overlay}>
             <div className={styles.modal}>
               {phase === "inventory" ? (

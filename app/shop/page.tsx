@@ -41,7 +41,7 @@ function CloudShape({ style }: { style: React.CSSProperties }) {
     <svg viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg"
       style={{ position: "absolute", pointerEvents: "none", opacity: 0.85, ...style }}>
       <ellipse cx="100" cy="55" rx="90" ry="28" fill="white" />
-      <ellipse cx="70"  cy="42" rx="45" ry="36" fill="white" />
+      <ellipse cx="70" cy="42" rx="45" ry="36" fill="white" />
       <ellipse cx="130" cy="45" rx="40" ry="32" fill="white" />
       <ellipse cx="100" cy="38" rx="35" ry="30" fill="white" />
     </svg>
@@ -62,25 +62,28 @@ function ItemCard({
   onBuy: (item: ShopItem) => Promise<boolean>;
 }) {
   const [pop, setPop] = useState(false);
-  const [localOwned, setLocalOwned] = useState(isOwned);
   const [busy, setBusy] = useState(false);
 
-  // Sync if parent ownership changes (e.g. after fetch)
-  useEffect(() => { setLocalOwned(isOwned); }, [isOwned]);
-
-  const isSinglePurchase = item.rarity === "legendary"; // mahkota — adjust as needed
-
-  const canBuy = isSinglePurchase ? !localOwned : true;
-
   async function handleBuy() {
-    if (busy || (isSinglePurchase && localOwned)) return;
+    if (busy) return;
+
+    try {
+      const audio = new Audio("/assets/sound/Purchase.mp3");
+      const raw = localStorage.getItem("game-user");
+      const user = raw ? JSON.parse(raw) : null;
+      const sfxVolume = Number(user?.sfx_volume ?? 80);
+      if (sfxVolume > 0) {
+        audio.volume = Math.max(0, Math.min(100, sfxVolume)) / 100;
+        audio.play().catch(() => { });
+      }
+    } catch { }
+
     setBusy(true);
     const success = await onBuy(item);
     setBusy(false);
     if (success) {
       setPop(true);
       setTimeout(() => setPop(false), 400);
-      if (isSinglePurchase) setLocalOwned(true);
     }
   }
 
@@ -104,13 +107,13 @@ function ItemCard({
           )}
         </div>
         <button
-          className={`${styles.buyBtn} ${(isSinglePurchase && localOwned) ? styles.buyBtnOwned : ""}`}
+          className={styles.buyBtn}
           onClick={handleBuy}
-          disabled={busy || (isSinglePurchase && localOwned)}
+          disabled={busy}
+          data-no-click-sound="true"
         >
           {busy ? <span className={styles.buySpinner} /> :
-           (isSinglePurchase && localOwned) ? <><CheckCircle size={14} /> PUNYA</> :
-           <><ShoppingCart size={14} /> BELI</>}
+            <><ShoppingCart size={14} /> BELI</>}
         </button>
       </div>
     </div>
@@ -184,7 +187,7 @@ export default function ShopPage() {
         u.points = pts;
         localStorage.setItem("game-user", JSON.stringify(u));
       }
-    } catch {}
+    } catch { }
   }
 
   // ── Fetch owned items ──
@@ -239,19 +242,7 @@ export default function ShopPage() {
       return false;
     }
 
-    // For legendary items: check if already owned
-    if (item.rarity === "legendary") {
-      const { data: existing } = await supabase
-        .from("user_inventory")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("item_id", item.id)
-        .maybeSingle();
-      if (existing) {
-        showToast("👑 Item ini sudah kamu miliki!", "err");
-        return false;
-      }
-    }
+
 
     const newCoins = item.price === 0 ? currentCoins + 100 : currentCoins - item.price;
 
@@ -293,7 +284,7 @@ export default function ShopPage() {
         u.points = newCoins;
         localStorage.setItem("game-user", JSON.stringify(u));
       }
-    } catch {}
+    } catch { }
 
     showToast(
       item.price === 0
@@ -307,11 +298,11 @@ export default function ShopPage() {
   const filtered = filter === "all" ? items : items.filter(i => i.rarity === filter);
 
   const floats = [
-    { emoji: "🪙", top: "6%",  left: "4%",  delay: "0s",   dur: "5s" },
+    { emoji: "🪙", top: "6%", left: "4%", delay: "0s", dur: "5s" },
     { emoji: "⭐", top: "10%", left: "88%", delay: "1.2s", dur: "6s" },
-    { emoji: "🎁", top: "30%", left: "2%",  delay: "2s",   dur: "4s" },
+    { emoji: "🎁", top: "30%", left: "2%", delay: "2s", dur: "4s" },
     { emoji: "💎", top: "20%", left: "92%", delay: "0.5s", dur: "7s" },
-    { emoji: "🌟", top: "5%",  left: "45%", delay: "3s",   dur: "5s" },
+    { emoji: "🌟", top: "5%", left: "45%", delay: "3s", dur: "5s" },
     { emoji: "🏅", top: "45%", left: "96%", delay: "1.8s", dur: "6s" },
   ];
 
@@ -322,10 +313,10 @@ export default function ShopPage() {
       <div className={styles.decorDots} />
       <div className={styles.sun} />
 
-      <CloudShape style={{ top: "3%",  left: "5%",   width: "160px" }} />
-      <CloudShape style={{ top: "7%",  left: "32%",  width: "130px", opacity: 0.6 }} />
-      <CloudShape style={{ top: "2%",  right: "18%", width: "150px" }} />
-      <CloudShape style={{ top: "16%", right: "2%",  width: "110px", opacity: 0.5 }} />
+      <CloudShape style={{ top: "3%", left: "5%", width: "160px" }} />
+      <CloudShape style={{ top: "7%", left: "32%", width: "130px", opacity: 0.6 }} />
+      <CloudShape style={{ top: "2%", right: "18%", width: "150px" }} />
+      <CloudShape style={{ top: "16%", right: "2%", width: "110px", opacity: 0.5 }} />
 
       {mounted && floats.map((f, i) => (
         <FloatingItem key={i} emoji={f.emoji}
@@ -376,9 +367,9 @@ export default function ShopPage() {
               : {}}
             onClick={() => setFilter(f)}>
             {f === "all" ? "🛒 Semua" :
-             f === "common" ? "⚪ Biasa" :
-             f === "rare" ? "🔵 Langka" :
-             f === "epic" ? "🟣 Epik" : "🌟 Legendaris"}
+              f === "common" ? "⚪ Biasa" :
+                f === "rare" ? "🔵 Langka" :
+                  f === "epic" ? "🟣 Epik" : "🌟 Legendaris"}
           </button>
         ))}
       </div>
